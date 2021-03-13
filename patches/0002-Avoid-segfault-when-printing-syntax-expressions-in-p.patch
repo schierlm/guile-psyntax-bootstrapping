@@ -1,0 +1,25 @@
+Subject: Avoid segfault when printing syntax expressions in psyntax-pp.scm
+
+---
+ libguile/print.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/libguile/print.c b/libguile/print.c
+index b10f0f8a8..6fbdc72e9 100644
+--- a/libguile/print.c
++++ b/libguile/print.c
+@@ -741,7 +741,10 @@ iprin1 (SCM exp, SCM port, scm_print_state *pstate)
+           scm_iprin1 (scm_keyword_to_symbol (exp), port, pstate);
+           break;
+         case scm_tc7_syntax:
+-	  scm_i_syntax_print (exp, port, pstate);
++	  scm_puts ("#<syntax ", port);
++	  scm_iprin1 (SCM_CELL_OBJECT_1 (exp), port, pstate);
++	  scm_puts (">", port);
++	  // scm_i_syntax_print (exp, port, pstate);
+           break;
+ 	case scm_tc7_atomic_box:
+ 	  scm_i_atomic_box_print (exp, port, pstate);
+-- 
+2.20.1
+
