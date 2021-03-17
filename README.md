@@ -9,7 +9,7 @@ This is an ("auditable" / "full source") bootstrap of Guile's psyntax system.
 You may replace psyntax.pp.scm by a file that contains only the line
 
     (primitive-load-path "psyntax-bootstrap/allsteps")
-    
+
 and in theory your Guile should still work (albeit start considerably slower).
 
 (See `psyntax-bootstrapping.scm` for description what these steps do and provide).
@@ -29,12 +29,59 @@ used to load the same definitions from boot-9.scm again, and finally loading the
 
 (Some steps have been tried and discarded again as they were not fruitful. These are collected in the `unused` directory.)
 
-Finally, you can use this bootstrap to 
+Finally, you can use this bootstrap to
 
     make ice-9/psyntax-pp.scm.gen
-    
+
 and it will dump a shiny new psyntax-pp.scm for you. Note that the last command is broken on guile 3.0.3 to 3.0.5, therefore
 I will use 3.0.2 in the CI task. But as psyntax-pp.scm is idential in all four versions, it hopefully does not matter too much.
+
+About Hygiene in psyntax
+------------------------
+
+You may wonder, what does it take to make this psyntax implementation a possible replacement of other syntax-case implementations?
+Adding with-ellipsis support is straightforward (it was removed as it is unneccessary for the bootstrap, and keeping it in would
+clutter the code and make it harder to follow), but what exactly makes this implementation unhygienic?
+
+I will try to explain the problem with an example. There is another example in `psyntax-bootstrapping.scm`, but this one is
+maybe easier to follow:
+
+    ¹: (define-syntax-rule (myfunc1 func aval bval) (let ((a aval)) (func a bval)))
+    ²: (define-syntax-rule (myfunc2 b aval) (let ((a aval)) (+ a b)))
+    ³: (myfunc1 myfunc2 20 22)
+
+Recall that define-syntax-rule internally maps to syntax-rule and then syntax-case where the right hand side is a new `(syntax)`
+invocation. And when expanding syntax macros, the whole input is also wrapped into a syntax expression. So, there are three
+syntax exxpressions in this example, one in each line.
+
+When expanding this expression, the result looks like the follows (I have annotated each atom with the syntax expression
+it comes from):
+
+       (myfunc1³ myfunc2³ 20³ 22³)
+    => (let¹ ((a¹ 20³) (myfunc2³ a¹ 22³))
+    => (let² ((a² 20³)) (let¹ ((a¹ 22³)) (+² a¹ a²)))
+
+This implementation does not track where syntax-objects come from, and will just call `syntax->datum` to strip the syntax objects
+out when evaluation finished. Therefore the code that is actually executed is:
+
+    => (let ((a 20)) (let ((a 22)) (+ a a)))
+
+Resulting in 44 instead of 42.
+
+So how could we fix this?
+
+First, when creating syntax objects (in `s3*-gen-syntax`) we will need to distinguish the syntax expressions. This could be done
+by using wraps like psyntax does it, or by simply incrementing a counter and remembering its value. The latter approach was
+rejected by Guile as it makes compiled forms unreproducible. Second, `$sc-dispatch` and `datum->syntax` will need to retain
+this information. And last, before calling `syntax->datum` in the define-syntax definition, some renaming needs to be performed:
+
+- Determine all symbols that exist from more than one syntax expression (in our example `let` and `a`)
+- Scan the expression (taking into account forms like `let` or `lambda`) to find if any of these symbols
+  is freshly bound. When such a location is found, replace the symbol by a fresh symbol wherever it occurs
+  from the same syntax expression (in our example, replace `a¹` by `newsym-87¹` and `a²` by `newsym-88²`)
+
+The resulting expression can then be evaluated. I am not sure whether this covers every case where the current implementation
+is unhygienic, but so far I cannot think of any counter example.
 
 Testing
 -------
