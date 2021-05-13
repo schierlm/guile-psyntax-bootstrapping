@@ -33,8 +33,8 @@ Finally, you can use this bootstrap to
 
     make ice-9/psyntax-pp.scm.gen
 
-and it will dump a shiny new psyntax-pp.scm for you. Note that the last command is broken on guile 3.0.3 to 3.0.5, therefore
-I will use 3.0.2 in the CI task. But as psyntax-pp.scm is idential in all four versions, it hopefully does not matter too much.
+and it will dump a shiny new psyntax-pp.scm for you. The bootstrap was tested on Guile 3.0.7. For 3.0.2, see the corresponding
+tag in this repo.
 
 About Hygiene in psyntax
 ------------------------
