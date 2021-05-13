@@ -2,10 +2,10 @@
 
 mkdir -p build
 cd build
-wget -nc https://ftp.gnu.org/gnu/guile/guile-3.0.2.tar.xz
-rm -rf guile-3.0.2
-tar xfvJ guile-3.0.2.tar.xz
-cd guile-3.0.2
+wget -nc https://ftp.gnu.org/gnu/guile/guile-3.0.7.tar.xz
+rm -rf guile-3.0.7
+tar xfvJ guile-3.0.7.tar.xz
+cd guile-3.0.7
 sha256sum module/ice-9/psyntax-pp.scm | tee psyntax-pp.sha256
 rm module/ice-9/psyntax-pp.scm
 

@@ -1,6 +1,6 @@
 --- psyntax-patched.scm
 +++ psyntax-patched.scm
-@@ -165,11 +165,11 @@
+@@ -138,12 +138,12 @@
  (eval-when (compile)
    (set-current-module (resolve-module '(guile))))
  
@@ -8,16 +8,18 @@
 -      (make-syntax (module-ref (current-module) 'make-syntax))
 -      (syntax-expression (module-ref (current-module) 'syntax-expression))
 -      (syntax-wrap (module-ref (current-module) 'syntax-wrap))
--      (syntax-module (module-ref (current-module) 'syntax-module)))
+-      (syntax-module (module-ref (current-module) 'syntax-module))
+-      (syntax-sourcev (module-ref (current-module) 'syntax-sourcev)))
 +(define syntax? (module-ref (current-module) 'syntax?))
 +(define make-syntax (module-ref (current-module) 'make-syntax))
 +(define syntax-expression (module-ref (current-module) 'syntax-expression))
 +(define syntax-wrap (module-ref (current-module) 'syntax-wrap))
 +(define syntax-module (module-ref (current-module) 'syntax-module))
++(define syntax-sourcev (module-ref (current-module) 'syntax-sourcev))
  
    (define-syntax define-expansion-constructors
      (lambda (x)
-@@ -220,6 +220,7 @@
+@@ -194,6 +194,7 @@
  
    (define-syntax define-structure
      (lambda (x)
@@ -25,7 +27,7 @@
        (define construct-name
          (lambda (template-identifier . args)
            (datum->syntax
-@@ -267,9 +268,9 @@
+@@ -241,9 +242,9 @@
                 (define assign
                   (lambda (x update)
                     (vector-set! x index update)))
@@ -37,7 +39,21 @@
      (define-expansion-constructors)
      (define-expansion-accessors lambda meta)
  
-@@ -717,6 +718,8 @@
+@@ -272,11 +273,12 @@
+     (define (sourcev-line s) (vector-ref s 1))
+     (define (sourcev-column s) (vector-ref s 2))
+     (define (sourcev->alist sourcev)
++     (s5*-letrec-defines ()
+       (define (maybe-acons k v tail) (if v (acons k v tail) tail))
+       (and sourcev
+            (maybe-acons 'filename (sourcev-filename sourcev)
+                         `((line . ,(sourcev-line sourcev))
+-                          (column . ,(sourcev-column sourcev))))))
++                          (column . ,(sourcev-column sourcev)))))))
+ 
+     (define (decorate-source e s)
+       (when (and s (supports-source-properties? e))
+@@ -702,6 +704,8 @@
                   (eq? (car x) (car y))
                   (same-marks? (cdr x) (cdr y))))))
  
@@ -46,7 +62,7 @@
      (define id-var-name
        ;; Syntax objects use wraps to associate names with marked
        ;; identifiers.  This function returns the name corresponding to
-@@ -743,9 +746,7 @@
+@@ -728,9 +732,7 @@
        ;; a string label.
        ;;
        (lambda (id w mod)
@@ -57,7 +73,7 @@
          (define search
            (lambda (sym subst marks mod)
              (if (null? subst)
-@@ -788,7 +789,7 @@
+@@ -773,7 +775,7 @@
                   (else (f (fx+ i 1))))))))
          (cond
           ((symbol? id)
@@ -66,7 +82,7 @@
           ((syntax? id)
            (let ((id (syntax-expression id))
                  (w1 (syntax-wrap id))
-@@ -797,9 +798,9 @@
+@@ -782,9 +784,9 @@
                (call-with-values (lambda () (search id (wrap-subst w) marks mod))
                  (lambda (new-id marks)
                    (or new-id
@@ -78,7 +94,7 @@
  
      ;; A helper procedure for syntax-locally-bound-identifiers, which
      ;; itself is a helper for transformer procedures.
-@@ -815,6 +816,7 @@
+@@ -800,6 +802,7 @@
      ;;
      (define locally-bound-identifiers
        (lambda (w mod)
@@ -86,7 +102,7 @@
          (define scan
            (lambda (subst results)
              (if (null? subst)
-@@ -848,11 +850,12 @@
+@@ -833,11 +836,12 @@
                                     (anti-mark (make-wrap (vector-ref marks i) subst))
                                     mod)
                               results)))))))
@@ -100,8 +116,8 @@
        (define (resolve-global var mod)
          (when (and (not mod) (current-module))
            (warn "module system is booted, we should have a module" var))
-@@ -945,7 +948,7 @@
-                                  (syntax-module id)
+@@ -930,7 +934,7 @@
+                                       (syntax-module id))
                                   mod)))
           (else
 -          (error "unexpected id-var-name" id w n)))))
@@ -109,7 +125,7 @@
  
      (define transformer-environment
        (make-fluid
-@@ -964,6 +967,7 @@
+@@ -949,6 +953,7 @@
                 (mj (and (syntax? j) (syntax-module j)))
                 (ni (id-var-name i empty-wrap mi))
                 (nj (id-var-name j empty-wrap mj)))
@@ -117,7 +133,7 @@
            (define (id-module-binding id mod)
              (module-variable
               (if mod
-@@ -991,7 +995,7 @@
+@@ -976,7 +981,7 @@
             (else
              ;; Otherwise `i' is bound, so check that `j' is bound, and
              ;; bound to the same thing.
@@ -126,7 +142,7 @@
      
      ;; bound-id=? may be passed unwrapped (or partially wrapped) ids as
      ;; long as the missing portion of the wrap is common to both of the ids
-@@ -1086,6 +1090,7 @@
+@@ -1075,6 +1080,7 @@
          (let* ((r (cons '("placeholder" . (placeholder)) r))
                 (ribcage (make-empty-ribcage))
                 (w (make-wrap (wrap-marks w) (cons ribcage (wrap-subst w)))))
@@ -134,7 +150,7 @@
            (define (record-definition! id var)
              (let ((mod (cons 'hygiene (module-name (current-module)))))
                ;; Ribcages map symbol+marks to names, mostly for
-@@ -1119,6 +1124,7 @@
+@@ -1108,6 +1114,7 @@
                        (append (parse1 (car body) r w s m esew mod)
                                exps)))))
            (define (parse1 x r w s m esew mod)
@@ -142,7 +158,7 @@
              (define (current-module-for-expansion mod)
                (case (car mod)
                  ;; If the module was just put in place for hygiene, in a
-@@ -1199,6 +1205,7 @@
+@@ -1188,6 +1195,7 @@
                       ((_ (x ...) e1 e2 ...)
                        (let ((when-list (parse-when-list e #'(x ...)))
                              (body #'(e1 e2 ...)))
@@ -150,7 +166,7 @@
                          (define (recurse m esew)
                            (parse body r w s m esew mod))
                          (cond
-@@ -1228,7 +1235,7 @@
+@@ -1217,7 +1225,7 @@
                             mod)
                            '())
                           (else
@@ -159,7 +175,7 @@
                    (else
                     (list
                      (if (eq? m 'c&e)
-@@ -1236,12 +1243,12 @@
+@@ -1225,12 +1233,12 @@
                            (top-level-eval-hook x mod)
                            (lambda () x))
                          (lambda ()
@@ -174,7 +190,7 @@
      
      (define expand-install-global
        (lambda (mod name type e)
-@@ -1524,6 +1531,7 @@
+@@ -1513,6 +1521,7 @@
      ;; possible.
      (define expand-macro
        (lambda (p e r w s rib mod)
@@ -182,7 +198,7 @@
          (define rebuild-macro-output
            (lambda (x m)
              (cond ((pair? x)
-@@ -1552,18 +1560,21 @@
+@@ -1544,18 +1553,21 @@
                    ((vector? x)
                     (let* ((n (vector-length x))
                            (v (decorate-source (make-vector n) s)))
@@ -212,7 +228,7 @@
  
      (define expand-body
        ;; In processing the forms of the body, we create a new, empty wrap.
-@@ -1791,6 +1802,7 @@
+@@ -1785,6 +1797,7 @@
  
      (define lambda-formals
        (lambda (orig-args)
@@ -220,7 +236,7 @@
          (define (req args rreq)
            (syntax-case args ()
              (()
-@@ -1808,7 +1820,7 @@
+@@ -1802,7 +1815,7 @@
             (else
              (syntax-violation 'lambda "duplicate identifier in argument list"
                                orig-args))))
@@ -229,7 +245,7 @@
  
      (define expand-simple-lambda
        (lambda (e r w s mod req rest meta body)
-@@ -1826,6 +1838,7 @@
+@@ -1820,6 +1833,7 @@
  
      (define lambda*-formals
        (lambda (orig-args)
@@ -237,7 +253,7 @@
          (define (req args rreq)
            (syntax-case args ()
              (()
-@@ -1903,10 +1916,11 @@
+@@ -1897,10 +1911,11 @@
             (else
              (syntax-violation 'lambda* "duplicate identifier in argument list"
                                orig-args))))
@@ -250,7 +266,7 @@
          (define (parse-req req opt rest kw body)
            (let ((vars (map gen-var req))
                  (labels (gen-labels req)))
-@@ -1994,7 +2008,7 @@
+@@ -1988,13 +2003,14 @@
                         (values
                          (append meta meta*)
                          (build-lambda-case s req opt rest kw inits vars
@@ -259,9 +275,25 @@
  
      ;; data
  
-@@ -2104,8 +2118,7 @@
-                        (_ (syntax-violation 'quote "bad syntax"
-                                             (source-wrap e w s mod))))))
+     ;; strips syntax objects, recursively.
+ 
+     (define (strip x)
++     (s5*-letrec-defines ()
+       (define (annotate proc datum)
+         (decorate-source datum (proc x)))
+       (cond
+@@ -2004,7 +2020,7 @@
+         (annotate datum-sourcev (cons (strip (car x)) (strip (cdr x)))))
+        ((vector? x)
+         (annotate datum-sourcev (list->vector (strip (vector->list x)))))
+-       (else x)))
++       (else x))))
+ 
+     ;; lexical variables
+ 
+@@ -2087,8 +2103,7 @@
+                        ((_ e) (build-data s #'e))
+                        (e (syntax-violation 'quote "bad syntax" #'e)))))
  
 -    (global-extend
 -     'core 'syntax
@@ -269,7 +301,7 @@
       (let ()
         (define gen-syntax
           (lambda (src e r maps ellipsis? mod)
-@@ -2298,6 +2311,7 @@
+@@ -2282,6 +2297,7 @@
  
      (global-extend 'core 'case-lambda
                     (lambda (e r w s mod)
@@ -277,7 +309,7 @@
                       (define (build-it meta clauses)
                         (call-with-values
                             (lambda ()
-@@ -2314,10 +2328,11 @@
+@@ -2298,10 +2314,11 @@
                          (build-it `((documentation
                                       . ,(syntax->datum #'docstring)))
                                    #'((args e1 e2 ...) ...)))
@@ -290,7 +322,7 @@
                       (define (build-it meta clauses)
                         (call-with-values
                             (lambda ()
-@@ -2334,7 +2349,7 @@
+@@ -2318,7 +2335,7 @@
                          (build-it `((documentation
                                       . ,(syntax->datum #'docstring)))
                                    #'((args e1 e2 ...) ...)))
@@ -299,7 +331,7 @@
  
      (global-extend 'core 'with-ellipsis
                     (lambda (e r w s mod)
-@@ -2492,6 +2507,7 @@
+@@ -2477,6 +2494,7 @@
  
      (global-extend 'module-ref '@@
                     (lambda (e r w mod)
@@ -307,8 +339,8 @@
                       (define remodulate
                         (lambda (x mod)
                           (cond ((pair? x)
-@@ -2505,9 +2521,11 @@
-                                  mod))
+@@ -2491,9 +2509,11 @@
+                                  (syntax-sourcev x)))
                                 ((vector? x)
                                  (let* ((n (vector-length x)) (v (make-vector n)))
 -                                  (do ((i 0 (fx+ i 1)))
@@ -322,7 +354,7 @@
                                 (else x))))
                       (syntax-case e (@@ primitive)
                         ((_ primitive id)
-@@ -2535,7 +2553,7 @@
+@@ -2521,7 +2541,7 @@
                          (let ((mod (syntax->datum #'(private mod ...))))
                            (values (remodulate #'exp mod)
                                    r w (source-annotation #'exp)
@@ -331,7 +363,7 @@
    
      (global-extend 'core 'if
                     (lambda (e r w s mod)
-@@ -2553,21 +2571,27 @@
+@@ -2539,21 +2559,27 @@
                           (expand #'then r w mod)
                           (expand #'else r w mod))))))
  
@@ -364,16 +396,16 @@
                           (define cvt*
                             (lambda (p* n ids)
                               (syntax-case p* ()
-@@ -2632,7 +2656,7 @@
+@@ -2618,7 +2644,7 @@
                                          (lambda () (cvt (syntax (x ...)) n ids))
                                        (lambda (p ids) (values (vector 'vector p) ids))))
-                                    (x (values (vector 'atom (strip p empty-wrap)) ids))))))
+                                    (x (values (vector 'atom (strip p)) ids))))))
 -                         (cvt pattern 0 '())))
 +                         (cvt pattern 0 '()))))
  
                       (define build-dispatch-call
                         (lambda (pvars exp y r mod)
-@@ -2749,7 +2773,7 @@
+@@ -2735,7 +2761,7 @@
      ;; syntactic definitions are evaluated immediately after they are
      ;; expanded, and the expanded definitions are also residualized into
      ;; the object file if we are compiling a file.
@@ -382,7 +414,7 @@
            (lambda* (x #:optional (m 'e) (esew '(eval)))
              (expand-top-sequence (list x) null-env top-wrap #f m esew
                                   (cons 'hygiene (module-name (current-module))))))
-@@ -2814,6 +2838,7 @@
+@@ -2810,6 +2836,7 @@
          (arg-check nonsymbol-id? id 'syntax-local-binding)
          (with-transformer-environment
           (lambda (e r w s rib mod)
@@ -390,16 +422,16 @@
             (define (strip-anti-mark w)
               (let ((ms (wrap-marks w)) (s (wrap-subst w)))
                 (if (and (pair? ms) (eq? (car ms) the-anti-mark))
-@@ -2844,7 +2869,7 @@
-                           (make-syntax (syntax-expression value)
-                                               (anti-mark (syntax-wrap value))
-                                               (syntax-module value))))
+@@ -2839,7 +2866,7 @@
+                   (values 'ellipsis
+                           (wrap-syntax value (anti-mark (syntax-wrap value))
+                                        mod)))
 -                 (else (values 'other #f))))))))
 +                 (else (values 'other #f)))))))))
  
        (define (syntax-locally-bound-identifiers id)
          (arg-check nonsymbol-id? id 'syntax-locally-bound-identifiers)
-@@ -2882,7 +2907,7 @@
+@@ -2877,7 +2904,7 @@
      ;; not, should convert to:
      ;;   #(vector <pattern>*)               #(<pattern>*)
  
@@ -408,7 +440,7 @@
  
        (define match-each
          (lambda (e p w mod)
-@@ -3021,8 +3046,36 @@
+@@ -3016,8 +3043,36 @@
                 ((syntax? e)
                  (match* (syntax-expression e)
                          p (syntax-wrap e) '() (syntax-module e)))
@@ -446,7 +478,7 @@
  
  (define-syntax with-syntax
     (lambda (x)
-@@ -3100,6 +3153,73 @@
+@@ -3095,6 +3150,73 @@
         (and (identifier? #'dots) (string? (syntax->datum #'docstring)))
         (expand-syntax-rules #'dots #'(k ...) #'(docstring) #'(((keyword . pattern) template) ...))))))
  
@@ -520,7 +552,7 @@
  (define-syntax define-syntax-rule
    (lambda (x)
      (syntax-case x ()
-@@ -3114,6 +3234,152 @@
+@@ -3109,6 +3231,152 @@
               docstring
               ((_ . pattern) template)))))))
  
