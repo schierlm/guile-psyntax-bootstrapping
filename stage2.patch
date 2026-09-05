@@ -1,6 +1,6 @@
 --- psyntax-patched.scm
 +++ psyntax-patched.scm
-@@ -138,12 +138,12 @@
+@@ -70,13 +70,13 @@
  (eval-when (compile)
    (set-current-module (resolve-module '(guile))))
  
@@ -9,451 +9,687 @@
 -      (syntax-expression (module-ref (current-module) 'syntax-expression))
 -      (syntax-wrap (module-ref (current-module) 'syntax-wrap))
 -      (syntax-module (module-ref (current-module) 'syntax-module))
--      (syntax-sourcev (module-ref (current-module) 'syntax-sourcev)))
+-      (syntax-sourcev (module-ref (current-module) 'syntax-sourcev))
+-      (empty-wrap (module-ref (current-module) 'syntax-empty-wrap)))
 +(define syntax? (module-ref (current-module) 'syntax?))
 +(define make-syntax (module-ref (current-module) 'make-syntax))
 +(define syntax-expression (module-ref (current-module) 'syntax-expression))
 +(define syntax-wrap (module-ref (current-module) 'syntax-wrap))
 +(define syntax-module (module-ref (current-module) 'syntax-module))
 +(define syntax-sourcev (module-ref (current-module) 'syntax-sourcev))
++(define empty-wrap (module-ref (current-module) 'syntax-empty-wrap))
  
    (define-syntax define-expansion-constructors
      (lambda (x)
-@@ -194,6 +194,7 @@
+@@ -115,12 +115,13 @@
+                                      (vector-ref %expanded-vtables #,n))))
+                          #,@(map
+                              (lambda (f)
++                               (s5*-letrec-defines ()
+                                (define get
+                                  (datum->syntax x (symbol-append stem '- f)))
+                                (define idx
+                                  (list-index all-fields f))
+                                #`(define (#,get x)
+-                                   (struct-ref x #,idx)))
++                                   (struct-ref x #,idx))))
+                              fields)))
+                    (lp (1+ n))))))))))
  
-   (define-syntax define-structure
-     (lambda (x)
-+     (s5*-letrec-defines () 
-       (define construct-name
-         (lambda (template-identifier . args)
-           (datum->syntax
-@@ -241,9 +242,9 @@
-                (define assign
-                  (lambda (x update)
-                    (vector-set! x index update)))
--               ...))))))
-+               ...)))))))
+@@ -193,11 +194,12 @@
+   (define (sourcev-line s) (vector-ref s 1))
+   (define (sourcev-column s) (vector-ref s 2))
+   (define (sourcev->alist sourcev)
++   (s5*-letrec-defines ()
+     (define (maybe-acons k v tail) (if v (acons k v tail) tail))
+     (and sourcev
+          (maybe-acons 'filename (sourcev-filename sourcev)
+                       `((line . ,(sourcev-line sourcev))
+-                        (column . ,(sourcev-column sourcev))))))
++                        (column . ,(sourcev-column sourcev)))))))
  
--  (let ()
-+;;  (let ()
-     (define-expansion-constructors)
-     (define-expansion-accessors lambda meta)
- 
-@@ -272,11 +273,12 @@
-     (define (sourcev-line s) (vector-ref s 1))
-     (define (sourcev-column s) (vector-ref s 2))
-     (define (sourcev->alist sourcev)
-+     (s5*-letrec-defines ()
-       (define (maybe-acons k v tail) (if v (acons k v tail) tail))
-       (and sourcev
-            (maybe-acons 'filename (sourcev-filename sourcev)
-                         `((line . ,(sourcev-line sourcev))
--                          (column . ,(sourcev-column sourcev))))))
-+                          (column . ,(sourcev-column sourcev)))))))
- 
-     (define (decorate-source e s)
-       (when (and s (supports-source-properties? e))
-@@ -702,6 +704,8 @@
-                  (eq? (car x) (car y))
-                  (same-marks? (cdr x) (cdr y))))))
- 
-+    (define-syntax-rule (id-var-name-first e) e)
-+    
-     (define id-var-name
-       ;; Syntax objects use wraps to associate names with marked
-       ;; identifiers.  This function returns the name corresponding to
-@@ -728,9 +732,7 @@
-       ;; a string label.
-       ;;
-       (lambda (id w mod)
--        (define-syntax-rule (first e)
--          ;; Rely on Guile's multiple-values truncation.
--          e)
-+        (s5*-letrec-defines () 
-         (define search
-           (lambda (sym subst marks mod)
-             (if (null? subst)
-@@ -773,7 +775,7 @@
-                  (else (f (fx+ i 1))))))))
-         (cond
-          ((symbol? id)
--          (or (first (search id (wrap-subst w) (wrap-marks w) mod)) id))
-+          (or (id-var-name-first (search id (wrap-subst w) (wrap-marks w) mod)) id))
-          ((syntax? id)
-           (let ((id (syntax-expression id))
-                 (w1 (syntax-wrap id))
-@@ -782,9 +784,9 @@
-               (call-with-values (lambda () (search id (wrap-subst w) marks mod))
-                 (lambda (new-id marks)
-                   (or new-id
--                      (first (search id (wrap-subst w1) marks mod))
-+                      (id-var-name-first (search id (wrap-subst w1) marks mod))
-                       id))))))
--         (else (syntax-violation 'id-var-name "invalid id" id)))))
-+         (else (syntax-violation 'id-var-name "invalid id" id))))))
- 
-     ;; A helper procedure for syntax-locally-bound-identifiers, which
-     ;; itself is a helper for transformer procedures.
-@@ -800,6 +802,7 @@
-     ;;
-     (define locally-bound-identifiers
-       (lambda (w mod)
-+       (s5*-letrec-defines ()
-         (define scan
-           (lambda (subst results)
-             (if (null? subst)
-@@ -833,11 +836,12 @@
-                                    (anti-mark (make-wrap (vector-ref marks i) subst))
-                                    mod)
-                              results)))))))
--        (scan (wrap-subst w) '())))
-+        (scan (wrap-subst w) '()))))
- 
-     ;; Returns three values: binding type, binding value, and the module
-     ;; (for resolving toplevel vars).
-     (define (resolve-identifier id w r mod resolve-syntax-parameters?)
-+     (s5*-letrec-defines ()
-       (define (resolve-global var mod)
-         (when (and (not mod) (current-module))
-           (warn "module system is booted, we should have a module" var))
-@@ -930,7 +934,7 @@
-                                       (syntax-module id))
-                                  mod)))
-          (else
--          (error "unexpected id-var-name" id w n)))))
-+          (error "unexpected id-var-name" id w n))))))
- 
-     (define transformer-environment
-       (make-fluid
-@@ -949,6 +953,7 @@
-                (mj (and (syntax? j) (syntax-module j)))
-                (ni (id-var-name i empty-wrap mi))
-                (nj (id-var-name j empty-wrap mj)))
-+         (s5*-letrec-defines ()
-           (define (id-module-binding id mod)
-             (module-variable
-              (if mod
-@@ -976,7 +981,7 @@
-            (else
-             ;; Otherwise `i' is bound, so check that `j' is bound, and
-             ;; bound to the same thing.
--            (equal? ni nj))))))
-+            (equal? ni nj)))))))
-     
-     ;; bound-id=? may be passed unwrapped (or partially wrapped) ids as
-     ;; long as the missing portion of the wrap is common to both of the ids
-@@ -1075,6 +1080,7 @@
-         (let* ((r (cons '("placeholder" . (placeholder)) r))
-                (ribcage (make-empty-ribcage))
-                (w (make-wrap (wrap-marks w) (cons ribcage (wrap-subst w)))))
-+         (s5*-letrec-defines ()
-           (define (record-definition! id var)
-             (let ((mod (cons 'hygiene (module-name (current-module)))))
-               ;; Ribcages map symbol+marks to names, mostly for
-@@ -1108,6 +1114,7 @@
-                       (append (parse1 (car body) r w s m esew mod)
-                               exps)))))
-           (define (parse1 x r w s m esew mod)
-+           (s5*-letrec-defines ()
-             (define (current-module-for-expansion mod)
-               (case (car mod)
-                 ;; If the module was just put in place for hygiene, in a
-@@ -1188,6 +1195,7 @@
-                      ((_ (x ...) e1 e2 ...)
-                       (let ((when-list (parse-when-list e #'(x ...)))
-                             (body #'(e1 e2 ...)))
-+                       (s5*-letrec-defines ()
-                         (define (recurse m esew)
-                           (parse body r w s m esew mod))
-                         (cond
-@@ -1217,7 +1225,7 @@
-                            mod)
-                           '())
-                          (else
--                          '()))))))
-+                          '())))))))
-                   (else
-                    (list
-                     (if (eq? m 'c&e)
-@@ -1225,12 +1233,12 @@
-                           (top-level-eval-hook x mod)
-                           (lambda () x))
-                         (lambda ()
--                          (expand-expr type value form e r w s mod)))))))))
-+                          (expand-expr type value form e r w s mod))))))))))
-           (let ((exps (map (lambda (x) (x))
-                            (reverse (parse body r w s m esew mod)))))
-             (if (null? exps)
-                 (build-void s)
--                (build-sequence s exps))))))
-+                (build-sequence s exps)))))))
-     
-     (define expand-install-global
-       (lambda (mod name type e)
-@@ -1513,6 +1521,7 @@
-     ;; possible.
-     (define expand-macro
-       (lambda (p e r w s rib mod)
-+       (s5*-letrec-defines ()
-         (define rebuild-macro-output
-           (lambda (x m)
-             (cond ((pair? x)
-@@ -1544,18 +1553,21 @@
-                   ((vector? x)
-                    (let* ((n (vector-length x))
-                           (v (decorate-source (make-vector n) s)))
--                     (do ((i 0 (fx+ i 1)))
--                         ((fx= i n) v)
--                       (vector-set! v i
--                                    (rebuild-macro-output (vector-ref x i) m)))))
-+                     (let ldo ((i 0))
-+                        (if (fx= i n) 
-+                            v
-+                            (begin
-+                              (vector-set! v i (rebuild-macro-output (vector-ref x i) m))
-+                              (ldo (fx+ i 1)))))))
-                   ((symbol? x)
-                    (syntax-violation #f "encountered raw symbol in macro output"
-                                      (source-wrap e w (wrap-subst w) mod) x))
-                   (else (decorate-source x s)))))
--        (with-fluids ((transformer-environment
--                       (lambda (k) (k e r w s rib mod))))
--          (rebuild-macro-output (p (source-wrap e (anti-mark w) s mod))
--                                (new-mark)))))
-+        (with-fluid* transformer-environment
-+                     (lambda (k) (k e r w s rib mod))
-+                     (lambda ()
-+                       (rebuild-macro-output (p (source-wrap e (anti-mark w) s mod))
-+                                             (new-mark)))))))
- 
-     (define expand-body
-       ;; In processing the forms of the body, we create a new, empty wrap.
-@@ -1785,6 +1797,7 @@
- 
-     (define lambda-formals
-       (lambda (orig-args)
-+       (s5*-letrec-defines ()
-         (define (req args rreq)
-           (syntax-case args ()
-             (()
-@@ -1802,7 +1815,7 @@
-            (else
-             (syntax-violation 'lambda "duplicate identifier in argument list"
-                               orig-args))))
--        (req orig-args '())))
-+        (req orig-args '()))))
- 
-     (define expand-simple-lambda
-       (lambda (e r w s mod req rest meta body)
-@@ -1820,6 +1833,7 @@
- 
-     (define lambda*-formals
-       (lambda (orig-args)
-+       (s5*-letrec-defines ()
-         (define (req args rreq)
-           (syntax-case args ()
-             (()
-@@ -1897,10 +1911,11 @@
-            (else
-             (syntax-violation 'lambda* "duplicate identifier in argument list"
-                               orig-args))))
--        (req orig-args '())))
-+        (req orig-args '()))))
- 
-     (define expand-lambda-case
-       (lambda (e r w s mod get-formals clauses)
-+       (s5*-letrec-defines ()
-         (define (parse-req req opt rest kw body)
-           (let ((vars (map gen-var req))
-                 (labels (gen-labels req)))
-@@ -1988,13 +2003,14 @@
-                        (values
-                         (append meta meta*)
-                         (build-lambda-case s req opt rest kw inits vars
--                                           body else*))))))))))))
-+                                           body else*)))))))))))))
- 
-     ;; data
- 
-     ;; strips syntax objects, recursively.
- 
-     (define (strip x)
-+     (s5*-letrec-defines ()
-       (define (annotate proc datum)
-         (decorate-source datum (proc x)))
-       (cond
-@@ -2004,7 +2020,7 @@
-         (annotate datum-sourcev (cons (strip (car x)) (strip (cdr x)))))
-        ((vector? x)
-         (annotate datum-sourcev (list->vector (strip (vector->list x)))))
--       (else x)))
-+       (else x))))
- 
-     ;; lexical variables
- 
-@@ -2087,8 +2103,7 @@
-                        ((_ e) (build-data s #'e))
-                        (e (syntax-violation 'quote "bad syntax" #'e)))))
- 
--    (global-extend
--     'core 'syntax
-+    (define *next*-syntax
-      (let ()
-        (define gen-syntax
-          (lambda (src e r maps ellipsis? mod)
-@@ -2282,6 +2297,7 @@
- 
-     (global-extend 'core 'case-lambda
-                    (lambda (e r w s mod)
-+                    (s5*-letrec-defines ()
-                      (define (build-it meta clauses)
-                        (call-with-values
-                            (lambda ()
-@@ -2298,10 +2314,11 @@
-                         (build-it `((documentation
-                                      . ,(syntax->datum #'docstring)))
-                                   #'((args e1 e2 ...) ...)))
--                       (_ (syntax-violation 'case-lambda "bad case-lambda" e)))))
-+                       (_ (syntax-violation 'case-lambda "bad case-lambda" e))))))
- 
-     (global-extend 'core 'case-lambda*
-                    (lambda (e r w s mod)
-+                     (s5*-letrec-defines ()
-                      (define (build-it meta clauses)
-                        (call-with-values
-                            (lambda ()
-@@ -2318,7 +2335,7 @@
-                         (build-it `((documentation
-                                      . ,(syntax->datum #'docstring)))
-                                   #'((args e1 e2 ...) ...)))
--                       (_ (syntax-violation 'case-lambda "bad case-lambda*" e)))))
-+                       (_ (syntax-violation 'case-lambda "bad case-lambda*" e))))))
- 
-     (global-extend 'core 'with-ellipsis
-                    (lambda (e r w s mod)
-@@ -2477,6 +2494,7 @@
- 
-     (global-extend 'module-ref '@@
-                    (lambda (e r w mod)
-+                    (s5*-letrec-defines ()
-                      (define remodulate
-                        (lambda (x mod)
-                          (cond ((pair? x)
-@@ -2491,9 +2509,11 @@
-                                  (syntax-sourcev x)))
-                                ((vector? x)
-                                 (let* ((n (vector-length x)) (v (make-vector n)))
--                                  (do ((i 0 (fx+ i 1)))
--                                      ((fx= i n) v)
--                                    (vector-set! v i (remodulate (vector-ref x i) mod)))))
-+                                  (let ldo ((i 0))
-+                                     (if (fx= i n) v
-+                                         (begin
-+                                         (vector-set! v i (remodulate (vector-ref x i) mod))
-+                                         (ldo (fx+ i 1)))))))
-                                (else x))))
-                      (syntax-case e (@@ primitive)
-                        ((_ primitive id)
-@@ -2521,7 +2541,7 @@
-                         (let ((mod (syntax->datum #'(private mod ...))))
-                           (values (remodulate #'exp mod)
-                                   r w (source-annotation #'exp)
--                                  mod))))))
-+                                  mod)))))))
+   (define (maybe-name-value name val)
+     (if (lambda? val)
+@@ -219,7 +221,7 @@
    
-     (global-extend 'core 'if
-                    (lambda (e r w s mod)
-@@ -2539,21 +2559,27 @@
-                          (expand #'then r w mod)
-                          (expand #'else r w mod))))))
+   (define (analyze-variable mod var modref-cont bare-cont)
+     (match mod
+-      (#f (bare-cont #f var))
++      ((? not) (bare-cont #f var))
+       (('public . mod) (modref-cont mod var #t))
+       (((or 'private 'hygiene) . mod)
+        (if (equal? mod (module-name (current-module)))
+@@ -459,6 +461,18 @@
+   (define (wrap-marks wrap) (car wrap))
+   (define (wrap-subst wrap) (cdr wrap))
  
--    (global-extend 'begin 'begin '())
-+(define-syntax define*
-+  (lambda (x)
-+    (syntax-case x ()
-+      ((_ (id . args) b0 b1 ...)
-+       #'(define id (lambda* args b0 b1 ...)))
-+      ((_ id val) (identifier? #'id)
-+       #'(define id val)))))
++;; from boot-9.scm
++
++  (define-syntax define*
++    (lambda (x)
++      (syntax-case x ()
++        ((_ (id . args) b0 b1 ...)
++         #'(define id (lambda* args b0 b1 ...)))
++        ((_ id val) (identifier? #'id)
++         #'(define id val)))))
++
++;;; end from boot-9.scm
++
+   (define* (gen-unique #:optional (module (current-module)))
+     ;; Generate a unique value, used as a mark to identify a scope, or
+     ;; as a label to associate an identifier with a lexical.  They
+@@ -605,6 +619,7 @@
+     ;; case, this routine returns either a symbol, a syntax object, or
+     ;; a string label.
+     ;;
++    (s5*-letrec-defines ()
+     (define (search sym subst marks mod)
+       (match subst
+         (() #f)
+@@ -613,6 +628,7 @@
+            ((_ . marks)
+             (search sym subst marks mod))))
+         ((#('ribcage rsymnames rmarks rlabels) . subst)
++         (s5*-letrec-defines ()
+          (define (search-list-rib)
+            (let lp ((rsymnames rsymnames)
+                     (rmarks rmarks)
+@@ -649,7 +665,7 @@
+                 (else (lp (1+ i)))))))
+          (if (vector? rsymnames)
+              (search-vector-rib)
+-             (search-list-rib)))))
++             (search-list-rib))))))
+     (cond
+      ((symbol? id)
+       (or (search id (wrap-subst w) (wrap-marks w) mod) id))
+@@ -661,7 +677,7 @@
+           (or (search id (wrap-subst w) marks mod)
+               (search id (wrap-subst w1) marks mod)
+               id))))
+-     (else (syntax-violation 'id-var-name "invalid id" id))))
++     (else (syntax-violation 'id-var-name "invalid id" id)))))
  
--    (global-extend 'define 'define '())
-+    (global-extend 'begin 'begin '())
+   ;; A helper procedure for syntax-locally-bound-identifiers, which
+   ;; itself is a helper for transformer procedures.
+@@ -676,11 +692,13 @@
+   ;; marks to them.
+   ;;
+   (define (locally-bound-identifiers w mod)
++    (s5*-letrec-defines ()
+     (define (scan subst results)
+       (match subst
+         (() results)
+         (('shift . subst) (scan subst results))
+         ((#('ribcage symnames marks labels) . subst*)
++         (s5*-letrec-defines ()
+          (define (scan-list-rib)
+            (let lp ((symnames symnames) (marks marks) (results results))
+              (match symnames
+@@ -703,12 +721,13 @@
+                                results)))))))
+          (if (vector? symnames)
+              (scan-vector-rib)
+-             (scan-list-rib)))))
+-    (scan (wrap-subst w) '()))
++             (scan-list-rib))))))
++    (scan (wrap-subst w) '())))
  
--    (global-extend 'define-syntax 'define-syntax '())
-     (global-extend 'define-syntax-parameter 'define-syntax-parameter '())
+   ;; Returns three values: binding type, binding value, and the module
+   ;; (for resolving toplevel vars).
+   (define (resolve-identifier id w r mod resolve-syntax-parameters?)
++    (s5*-letrec-defines ()
+     (define (resolve-global var mod)
+       (when (and (not mod) (current-module))
+         (warn "module system is booted, we should have a module" var))
+@@ -798,7 +817,7 @@
+        (else
+         (resolve-lexical n (or (and (syntax? id)
+                                     (syntax-module id))
+-                               mod))))))
++                               mod)))))))
  
-     (global-extend 'eval-when 'eval-when '())
+   (define transformer-environment
+     (make-fluid
+@@ -816,6 +835,7 @@
+            (mj (and (syntax? j) (syntax-module j)))
+            (ni (id-var-name i empty-wrap mi))
+            (nj (id-var-name j empty-wrap mj)))
++      (s5*-letrec-defines ()
+       (define (id-module-binding id mod)
+         (module-variable
+          (if mod
+@@ -841,7 +861,7 @@
+        (else
+         ;; Otherwise `i' is bound, so check that `j' is bound, and
+         ;; bound to the same thing.
+-        (equal? ni nj)))))
++        (equal? ni nj))))))
+   
+   ;; bound-id=? may be passed unwrapped (or partially wrapped) ids as
+   ;; long as the missing portion of the wrap is common to both of the ids
+@@ -939,6 +959,7 @@
+     (let* ((r (cons '("placeholder" . (placeholder)) r))
+            (ribcage (make-empty-ribcage))
+            (w (make-wrap (wrap-marks w) (cons ribcage (wrap-subst w)))))
++      (s5*-letrec-defines ()
+       (define (record-definition! id var)
+         (let ((mod (cons 'hygiene (module-name (current-module)))))
+           ;; Ribcages map symbol+marks to names, mostly for
+@@ -960,6 +981,7 @@
+         ;; think: Guile's hash function stops descending into cdr's
+         ;; at some point.  So, within an expansion unit, fall back
+         ;; to appending a uniquifying integer.
++        (s5*-letrec-defines ()
+         (define (ribcage-has-var? var)
+           (let lp ((labels (ribcage-labels ribcage)))
+             (match labels
+@@ -971,7 +993,7 @@
+           (if (ribcage-has-var? unique)
+               (let ((tail (string->symbol (number->string n))))
+                 (lp (symbol-append var '- tail) (1+ n)))
+-              unique)))
++              unique))))
+       (define (fresh-derived-name id orig-form)
+         (ensure-fresh-name
+          (symbol-append
+@@ -991,6 +1013,7 @@
+              (let ((thunks (parse1 head r w s m esew mod)))
+                (append thunks (lp tail)))))))
+       (define (parse1 x r w s m esew mod)
++        (s5*-letrec-defines ()
+         (define (current-module-for-expansion mod)
+           (match mod
+             (('hygiene . _)
+@@ -1070,6 +1093,7 @@
+                  ((_ (x ...) e1 e2 ...)
+                   (let ((when-list (parse-when-list e #'(x ...)))
+                         (body #'(e1 e2 ...)))
++                    (s5*-letrec-defines ()
+                     (define (recurse m esew)
+                       (parse body r w s m esew mod))
+                     (cond
+@@ -1099,7 +1123,7 @@
+                        mod)
+                       '())
+                      (else
+-                      '()))))))
++                      '())))))))
+               (else
+                (list
+                 (if (eq? m 'c&e)
+@@ -1107,13 +1131,13 @@
+                       (top-level-eval x mod)
+                       (lambda () x))
+                     (lambda ()
+-                      (expand-expr type value form e r w s mod)))))))))
++                      (expand-expr type value form e r w s mod))))))))))
+       (match (let lp ((thunks (parse body r w s m esew mod)))
+                (match thunks
+                  (() '())
+                  ((thunk . thunks) (cons (thunk) (lp thunks)))))
+         (() (build-void s))
+-        (exps (build-sequence s exps)))))
++        (exps (build-sequence s exps))))))
+   
+   (define (expand-install-global mod name type e)
+     (build-global-definition
+@@ -1384,6 +1408,7 @@
+   ;; locations corresponding to the macro definition, but that is not yet
+   ;; possible.
+   (define (expand-macro p e r w s rib mod)
++    (s5*-letrec-defines ()
+     (define (decorate-source x)
+       (source-wrap x empty-wrap s #f))
+     (define (map* f x)
+@@ -1420,19 +1445,22 @@
+               ((vector? x)
+                (let* ((n (vector-length x))
+                       (v (make-vector n)))
+-                 (do ((i 0 (1+ i)))
+-                     ((= i n) v)
+-                   (vector-set! v i
+-                                (rebuild-macro-output (vector-ref x i) m)))
++                 (let ldo ((i 0))
++                   (if (= i n)
++                       v
++                       (begin
++                         (vector-set! v i (rebuild-macro-output (vector-ref x i) m))
++                         (ldo (+ i 1)))))
+                  (decorate-source v)))
+               ((symbol? x)
+                (syntax-violation #f "encountered raw symbol in macro output"
+                                  (source-wrap e w (wrap-subst w) mod) x))
+               (else (decorate-source x)))))
+-    (with-fluids ((transformer-environment
+-                   (lambda (k) (k e r w s rib mod))))
+-      (rebuild-macro-output (p (source-wrap e (anti-mark w) s mod))
+-                            (new-mark))))
++    (with-fluid* transformer-environment
++                 (lambda (k) (k e r w s rib mod))
++                 (lambda ()
++                   (rebuild-macro-output (p (source-wrap e (anti-mark w) s mod))
++                                         (new-mark))))))
  
--    (global-extend 'core 'syntax-case
--                   (let ()
-+    (define *next*-syntax-case
-+                   (s5*-letrec-defines ()
-                      (define convert-pattern
-                        ;; accepts pattern & keys
-                        ;; returns $sc-dispatch pattern & ids
-                        (lambda (pattern keys ellipsis?)
-+                        (s5*-letrec-defines ()
-                          (define cvt*
-                            (lambda (p* n ids)
-                              (syntax-case p* ()
-@@ -2618,7 +2644,7 @@
-                                         (lambda () (cvt (syntax (x ...)) n ids))
-                                       (lambda (p ids) (values (vector 'vector p) ids))))
-                                    (x (values (vector 'atom (strip p)) ids))))))
--                         (cvt pattern 0 '())))
-+                         (cvt pattern 0 '()))))
+   (define (expand-body body outer-form r w mod)
+     ;; In processing the forms of the body, we create a new, empty wrap.
+@@ -1661,7 +1689,7 @@
+   ;;
+   ;;  ((@ (srfi srfi-1) fold) + -1 '(1 2 40))
+   (define (expand-with-modules e r w s mod)
+-
++    (s5*-letrec-defines ()
+     (define (key->keyword key)
+       (case (syntax->datum key)
+         ((#:select :select) #:select)
+@@ -1671,7 +1699,7 @@
+         (else #f)))
  
-                      (define build-dispatch-call
-                        (lambda (pvars exp y r mod)
-@@ -2735,7 +2761,7 @@
-     ;; syntactic definitions are evaluated immediately after they are
-     ;; expanded, and the expanded definitions are also residualized into
-     ;; the object file if we are compiling a file.
--    (set! macroexpand
-+    (define *next*-macroexpand
-           (lambda* (x #:optional (m 'e) (esew '(eval)))
-             (expand-top-sequence (list x) null-env top-wrap #f m esew
-                                  (cons 'hygiene (module-name (current-module))))))
-@@ -2810,6 +2836,7 @@
-         (arg-check nonsymbol-id? id 'syntax-local-binding)
-         (with-transformer-environment
-          (lambda (e r w s rib mod)
-+          (s5*-letrec-defines ()
-            (define (strip-anti-mark w)
-              (let ((ms (wrap-marks w)) (s (wrap-subst w)))
-                (if (and (pair? ms) (eq? (car ms) the-anti-mark))
-@@ -2839,7 +2866,7 @@
-                   (values 'ellipsis
-                           (wrap-syntax value (anti-mark (syntax-wrap value))
-                                        mod)))
--                 (else (values 'other #f))))))))
-+                 (else (values 'other #f)))))))))
+     (define (check-spec-arguments arguments)
+-
++      (s5*-letrec-defines ()
+       (define (valid-select-spec? spec)
+         (syntax-case spec ()
+           (symbol (id? #'symbol) #t)
+@@ -1701,10 +1729,10 @@
+             (check-spec-arguments #'rest))
+            (else
+             #f)))
+-        (_ #f)))
++        (_ #f))))
  
-       (define (syntax-locally-bound-identifiers id)
-         (arg-check nonsymbol-id? id 'syntax-locally-bound-identifiers)
-@@ -2877,7 +2904,7 @@
-     ;; not, should convert to:
-     ;;   #(vector <pattern>*)               #(<pattern>*)
+     (define (get-kw-argument arguments transform kw)
+-
++      (s5*-letrec-defines ()
+       (define (extract arguments last-value)
+         (syntax-case arguments ()
+           ((key value . rest)
+@@ -1714,7 +1742,7 @@
+                         last-value)))
+           (() last-value)))
  
+-      (extract arguments #f))
++      (extract arguments #f)))
+ 
+     (define (make-selection select-specs)
+       (map
+@@ -1767,6 +1795,7 @@
+ 
+     (define (collect-module-bindings module-name interface
+                                      select hide prefix renamer)
++      (s5*-letrec-defines ()
+       (define selector
+         (if select
+             (let ((selection (make-selection select)))
+@@ -1830,7 +1859,7 @@
+                             module-name orig)))))
+                  (set! bindings (cons (cons id binding) bindings))))))
+          interface)
+-        bindings))
++        bindings)))
+ 
+     (define (valid-module-name? stx)
+       (syntax-case stx ()
+@@ -1890,7 +1919,7 @@
+                       (source-wrap e new-w s mod)
+                       new-r new-w mod)))
+       (_ (syntax-violation 'with-modules "bad with-modules form"
+-                           (source-wrap e w s mod)))))
++                           (source-wrap e w s mod))))))
+ 
+   (define (expand-void)
+     (build-void no-source))
+@@ -1916,6 +1945,7 @@
+                  (free-id=? e #'(... ...)))))))
+ 
+   (define (lambda-formals orig-args)
++   (s5*-letrec-defines ()
+     (define (req args rreq)
+       (syntax-case args ()
+         (()
+@@ -1933,7 +1963,7 @@
+        (else
+         (syntax-violation 'lambda "duplicate identifier in argument list"
+                           orig-args))))
+-    (req orig-args '()))
++    (req orig-args '())))
+ 
+   (define (expand-simple-lambda e r w s mod req rest meta body)
+     (let* ((ids (if rest (append req (list rest)) req))
+@@ -1949,6 +1979,7 @@
+                     mod))))
+ 
+   (define (lambda*-formals orig-args)
++    (s5*-letrec-defines ()
+     (define (req args rreq)
+       (syntax-case args ()
+         (()
+@@ -2026,9 +2057,10 @@
+        (else
+         (syntax-violation 'lambda* "duplicate identifier in argument list"
+                           orig-args))))
+-    (req orig-args '()))
++    (req orig-args '())))
+ 
+   (define (expand-lambda-case e r w s mod get-formals clauses)
++    (s5*-letrec-defines ()
+     (define (parse-req req opt rest kw body)
+       (let ((vars (map gen-var req))
+             (labels (gen-labels req)))
+@@ -2116,13 +2148,14 @@
+                    (values
+                     (append meta meta*)
+                     (build-lambda-case s req opt rest kw inits vars
+-                                       body else*)))))))))))
++                                       body else*))))))))))))
+ 
+   ;; data
+ 
+   ;; strips syntax objects, recursively.
+ 
+   (define (strip x)
++    (s5*-letrec-defines ()
+     (define (annotate proc datum)
+       (let ((s (proc x)))
+         (when (and s (supports-source-properties? datum))
+@@ -2135,7 +2168,7 @@
+       (cons (strip (car x)) (strip (cdr x))))
+      ((vector? x)
+       (list->vector (strip (vector->list x))))
+-     (else x)))
++     (else x))))
+ 
+   ;; lexical variables
+ 
+@@ -2393,6 +2426,7 @@
+       (_ (syntax-violation 'lambda "bad lambda*" e))))
+ 
+   (define (expand-case-lambda e r w s mod)
++    (s5*-letrec-defines ()
+     (define (build-it meta clauses)
+       (call-with-values
+           (lambda ()
+@@ -2409,9 +2443,10 @@
+        (build-it `((documentation
+                     . ,(syntax->datum #'docstring)))
+                  #'((args e1 e2 ...) ...)))
+-      (_ (syntax-violation 'case-lambda "bad case-lambda" e))))
++      (_ (syntax-violation 'case-lambda "bad case-lambda" e)))))
+ 
+   (define (expand-case-lambda* e r w s mod)
++    (s5*-letrec-defines ()
+     (define (build-it meta clauses)
+       (call-with-values
+           (lambda ()
+@@ -2428,7 +2463,7 @@
+        (build-it `((documentation
+                     . ,(syntax->datum #'docstring)))
+                  #'((args e1 e2 ...) ...)))
+-      (_ (syntax-violation 'case-lambda "bad case-lambda*" e))))
++      (_ (syntax-violation 'case-lambda "bad case-lambda*" e)))))
+ 
+   (define (expand-with-ellipsis e r w s mod)
+     (syntax-case e ()
+@@ -2450,8 +2485,9 @@
+                            (source-wrap e w s mod)))))
+ 
+   (define expand-let
++    (s5*-letrec-defines ()
+     (let ()
+-      (define (expand-let e r w s mod constructor ids vals exps)
++      (define (expand-let0 e r w s mod constructor ids vals exps)
+         (if (not (valid-bound-ids? ids))
+             (syntax-violation 'let "duplicate bound variable" e)
+             (let ((labels (gen-labels ids))
+@@ -2468,19 +2504,19 @@
+         (syntax-case e ()
+           ((_ ((id val) ...) e1 e2 ...)
+            (and-map id? #'(id ...))
+-           (expand-let e r w s mod
++           (expand-let0 e r w s mod
+                        build-let
+                        #'(id ...)
+                        #'(val ...)
+                        #'(e1 e2 ...)))
+           ((_ f ((id val) ...) e1 e2 ...)
+            (and (id? #'f) (and-map id? #'(id ...)))
+-           (expand-let e r w s mod
++           (expand-let0 e r w s mod
+                        build-named-let
+                        #'(f id ...)
+                        #'(val ...)
+                        #'(e1 e2 ...)))
+-          (_ (syntax-violation 'let "bad let" (source-wrap e w s mod)))))))
++          (_ (syntax-violation 'let "bad let" (source-wrap e w s mod))))))))
+ 
+   (define (expand-letrec e r w s mod)
+     (syntax-case e ()
+@@ -2577,6 +2613,7 @@
+                 #'(public mod ...))))))
+ 
+   (define (expand-private-ref e r w mod)
++    (s5*-letrec-defines ()
+     (define (remodulate x mod)
+       (cond ((pair? x)
+              (cons (remodulate (car x) mod)
+@@ -2590,9 +2627,11 @@
+               (syntax-sourcev x)))
+             ((vector? x)
+              (let* ((n (vector-length x)) (v (make-vector n)))
+-               (do ((i 0 (1+ i)))
+-                   ((= i n) v)
+-                 (vector-set! v i (remodulate (vector-ref x i) mod)))))
++               (let ldo ((i 0))
++                 (if (= i n) v
++                     (begin
++                       (vector-set! v i (remodulate (vector-ref x i) mod))
++                       (ldo (+ i 1)))))))
+             (else x)))
+     (syntax-case e (@@ primitive)
+       ((_ primitive id)
+@@ -2620,7 +2659,7 @@
+        (let ((mod (syntax->datum #'(private mod ...))))
+          (values (remodulate #'exp mod)
+                  r w (source-annotation #'exp)
+-                 mod)))))
++                 mod))))))
+ 
+   (define (expand-if e r w s mod)
+     (syntax-case e ()
+@@ -2638,10 +2677,11 @@
+         (expand #'(let () else) r w mod)))))
+ 
+   (define expand-syntax-case
 -    (let ()
 +    (s5*-letrec-defines ()
+       (define (convert-pattern pattern keys ellipsis?)
+         ;; accepts pattern & keys
+         ;; returns $sc-dispatch pattern & ids
++        (s5*-letrec-defines ()
+         (define cvt*
+           (lambda (p* n ids)
+             (syntax-case p* ()
+@@ -2661,8 +2701,7 @@
+                 (values r x)
+                 (loop (cons (car x) r) (cdr x)))))
  
-       (define match-each
-         (lambda (e p w mod)
-@@ -3016,8 +3043,36 @@
-                ((syntax? e)
-                 (match* (syntax-expression e)
-                         p (syntax-wrap e) '() (syntax-module e)))
--               (else (match* e p empty-wrap '() #f))))))))
-+               (else (match* e p empty-wrap '() #f))))))
+-        (define cvt
+-          (lambda (p n ids)
++        (define (cvt p n ids)
+             (if (id? p)
+                 (cond
+                  ((bound-id-member? p keys)
+@@ -2705,8 +2744,8 @@
+                    (call-with-values
+                        (lambda () (cvt (syntax (x ...)) n ids))
+                      (lambda (p ids) (values (vector 'vector p) ids))))
+-                  (x (values (vector 'atom (strip p)) ids))))))
+-        (cvt pattern 0 '()))
++                  (x (values (vector 'atom (strip p)) ids)))))
++        (cvt pattern 0 '())))
+ 
+       (define (build-dispatch-call pvars exp y r mod)
+         (let ((ids (map car pvars)) (levels (map cdr pvars)))
+@@ -2814,7 +2853,6 @@
+   (global-extend 'core 'syntax-parameterize expand-syntax-parameterize)
+   (global-extend 'core 'quote expand-quote)
+   (global-extend 'core 'quote-syntax expand-quote-syntax)
+-  (global-extend 'core 'syntax expand-syntax)
+   (global-extend 'core 'lambda expand-lambda)
+   (global-extend 'core 'lambda* expand-lambda*)
+   (global-extend 'core 'case-lambda expand-case-lambda)
+@@ -2829,12 +2867,9 @@
+   (global-extend 'module-ref '@@ expand-private-ref)
+   (global-extend 'core 'if expand-if)
+   (global-extend 'begin 'begin '())
+-  (global-extend 'define 'define '())
+-  (global-extend 'define-syntax 'define-syntax '())
+   (global-extend 'define-syntax-parameter 'define-syntax-parameter '())
+   (global-extend 'eval-when 'eval-when '())
+-  (global-extend 'core 'syntax-case expand-syntax-case)
+-
++  
+   (define-syntax define/override
+     (syntax-rules ()
+       ((_ (id . args) . body) (define/override id (lambda args . body)))
+@@ -2852,8 +2887,10 @@
+   ;; syntactic definitions are evaluated immediately after they are
+   ;; expanded, and the expanded definitions are also residualized into
+   ;; the object file if we are compiling a file.
+-  (define*/override (macroexpand x #:optional (m 'e) (esew '(eval)))
++  (define* (*next*-macroexpand x #:optional (m 'e) (esew '(eval)))
++    (s5*-letrec-defines ()
+     (define (unstrip x)
++      (s5*-letrec-defines ()
+       (define (annotate result)
+         (let ((props (source-properties x)))
+           (if (pair? props)
+@@ -2866,14 +2903,15 @@
+         (let ((v (make-vector (vector-length x))))
+           (annotate (list->vector (map unstrip (vector->list x))))))
+        ((syntax? x) x)
+-       (else (annotate x))))
++       (else (annotate x)))))
+     (expand-top-sequence (list (unstrip x)) null-env top-wrap #f m esew
+-                         (cons 'hygiene (module-name (current-module)))))
++                         (cons 'hygiene (module-name (current-module))))))
+ 
+   (define/override (identifier? x)
+     (nonsymbol-id? x))
+ 
+   (define*/override (datum->syntax id datum #:key source)
++    (s5*-letrec-defines ()
+     (define (props->sourcev alist)
+       (and (pair? alist)
+            (vector (assq-ref alist 'filename)
+@@ -2893,7 +2931,7 @@
+                    (props->sourcev source))
+                   ((and (vector? source) (= 3 (vector-length source)))
+                    source)
+-                  (else (syntax-sourcev source)))))
++                  (else (syntax-sourcev source))))))
+ 
+   (define/override (syntax->datum x)
+     ;; accepts any object, since syntax objects may consist partially
+@@ -2940,6 +2978,7 @@
+       (arg-check nonsymbol-id? id 'syntax-local-binding)
+       (with-transformer-environment
+        (lambda (e r w s rib mod)
++         (s5*-letrec-defines ()
+          (define (strip-anti-mark w)
+            (let ((ms (wrap-marks w)) (s (wrap-subst w)))
+              (if (and (pair? ms) (eq? (car ms) the-anti-mark))
+@@ -2969,7 +3008,7 @@
+                 (values 'ellipsis
+                         (wrap-syntax value (anti-mark (syntax-wrap value))
+                                      mod)))
+-               (else (values 'other #f))))))))
++               (else (values 'other #f)))))))))
+ 
+     (define (syntax-locally-bound-identifiers id)
+       (arg-check nonsymbol-id? id 'syntax-locally-bound-identifiers)
+@@ -2983,7 +3022,7 @@
+     (define! '%syntax-module %syntax-module)
+     (define! 'syntax-local-binding syntax-local-binding)
+     (define! 'syntax-locally-bound-identifiers syntax-locally-bound-identifiers))
+-  
++
+   (define/override ($sc-dispatch e p)
+     ;; $sc-dispatch expects an expression and a pattern.  If the expression
+     ;; matches the pattern a list of the matching expressions for each
+@@ -3005,11 +3044,11 @@
+     ;; Vector cops out to pair under assumption that vectors are rare.  If
+     ;; not, should convert to:
+     ;;   #(vector <pattern>*)               #(<pattern>*)
+-
++    (s5*-letrec-defines ()
+     (define (match-each e p w mod)
+       (cond
+        ((pair? e)
+-        (let ((first (match (car e) p w '() mod)))
++        (let ((first (match0 (car e) p w '() mod)))
+           (and first
+                (let ((rest (match-each (cdr e) p w mod)))
+                  (and rest (cons first rest))))))
+@@ -3029,20 +3068,20 @@
+             (lambda (xr* y-pat r)
+               (if r
+                   (if (null? y-pat)
+-                      (let ((xr (match (car e) x-pat w '() mod)))
++                      (let ((xr (match0 (car e) x-pat w '() mod)))
+                         (if xr
+                             (values (cons xr xr*) y-pat r)
+                             (values #f #f #f)))
+                       (values
+                        '()
+                        (cdr y-pat)
+-                       (match (car e) (car y-pat) w r mod)))
++                       (match0 (car e) (car y-pat) w r mod)))
+                   (values #f #f #f)))))
+          ((syntax? e)
+           (f (syntax-expression e)
+              (join-wraps w (syntax-wrap e))))
+          (else
+-          (values '() y-pat (match e z-pat w r mod))))))
++          (values '() y-pat (match0 e z-pat w r mod))))))
+ 
+     (define (match-each-any e w mod)
+       (cond
+@@ -3082,8 +3121,8 @@
+       (cond
+        ((null? p) (and (null? e) r))
+        ((pair? p)
+-        (and (pair? e) (match (car e) (car p) w
+-                              (match (cdr e) (cdr p) w r mod)
++        (and (pair? e) (match0 (car e) (car p) w
++                              (match0 (cdr e) (cdr p) w r mod)
+                               mod)))
+        ((eq? p 'each-any)
+         (let ((l (match-each-any e w mod))) (and l (cons l r))))
+@@ -3112,9 +3151,9 @@
+           ((atom) (and (equal? (vector-ref p 1) (strip e)) r))
+           ((vector)
+            (and (vector? e)
+-                (match (vector->list e) (vector-ref p 1) w r mod)))))))
++                (match0 (vector->list e) (vector-ref p 1) w r mod)))))))
+ 
+-    (define (match e p w r mod)
++    (define (match0 e p w r mod)
+       (cond
+        ((not r) #f)
+        ((eq? p '_) r)
+@@ -3136,6 +3175,35 @@
+               p (syntax-wrap e) '() (syntax-module e)))
+      (else (match* e p empty-wrap '() #f)))))
+ 
 +;; )
 +
 +;;; now do the switch!
- 
-+(global-extend 'core 'syntax *next*-syntax)
++
++(global-extend 'core 'syntax expand-syntax)
 +(global-extend 'define 'define '())
 +(global-extend 'define-syntax 'define-syntax '())
-+(global-extend 'core 'syntax-case *next*-syntax-case)
++(global-extend 'core 'syntax-case expand-syntax-case)
 +(set! s4*-$sc-dispatch $sc-dispatch)
 +(set! s5*-letrec-defines letrec)
 +(set! macroexpand *next*-macroexpand)
@@ -478,7 +714,24 @@
  
  (define-syntax with-syntax
     (lambda (x)
-@@ -3095,6 +3150,73 @@
+@@ -3169,6 +3237,16 @@
+        (string? (syntax->datum #'message))
+        #'(syntax-error (#f) message arg ...)))))
+ 
++;; again from boot-9.scm
++  (define-syntax define*
++    (lambda (x)
++      (syntax-case x ()
++        ((_ (id . args) b0 b1 ...)
++         #'(define id (lambda* args b0 b1 ...)))
++        ((_ id val) (identifier? #'id)
++         #'(define id val)))))
++;;; again end from boot-9.scm
++
+ (define-syntax syntax-rules
+   (lambda (xx)
+     (define (expand-clause clause)
+@@ -3213,6 +3291,73 @@
         (and (identifier? #'dots) (string? (syntax->datum #'docstring)))
         (expand-syntax-rules #'dots #'(k ...) #'(docstring) #'(((keyword . pattern) template) ...))))))
  
@@ -552,12 +805,11 @@
  (define-syntax define-syntax-rule
    (lambda (x)
      (syntax-case x ()
-@@ -3109,6 +3231,152 @@
-              docstring
-              ((_ . pattern) template)))))))
+@@ -3239,6 +3384,151 @@
+                            (binding (car bindings)))
+                #'(let (binding) body))))))))
  
-+
-+;;; from boot-9.scm, with replaced define*
++;;; from boot-9.scm
 +
 +(define-syntax-rule (when test stmt stmt* ...)
 +  (if test (begin stmt stmt* ...)))
@@ -702,6 +954,18 @@
 +
 +;;; end from boot-9.scm
 +
- (define-syntax let*
-   (lambda (x)
-     (syntax-case x ()
+ (define-syntax quasiquote
+   (let ()
+     (define (quasi p lev)
+@@ -3451,11 +3741,3 @@
+               ((set! var val) #'exp2)
+               ((id x (... ...)) #'(exp1 x (... ...)))
+               (id (identifier? #'id) #'exp1))))))))
+-
+-(define-syntax define*
+-  (lambda (x)
+-    (syntax-case x ()
+-      ((_ (id . args) b0 b1 ...)
+-       #'(define id (lambda* args b0 b1 ...)))
+-      ((_ id val) (identifier? #'id)
+-       #'(define id val)))))

@@ -2,11 +2,11 @@
 
 mkdir -p build
 cd build
-wget -nc https://ftp.gnu.org/gnu/guile/guile-3.0.7.tar.xz
-rm -rf guile-3.0.7
-tar xfvJ guile-3.0.7.tar.xz
-cd guile-3.0.7
-sha256sum module/ice-9/psyntax-pp.scm | tee psyntax-pp.sha256
+git clone https://codeberg.org/guile/guile --revision=26200b67055e51f12f47f03fba50971b7ae4fae0 --depth=1
+cd guile
+# git reset
+# The older version differs slightly from the newly generated one
+echo 'c575d13b0388cd3be07282f733ffadca7bbadff247185c9ac40a361057c05a53  module/ice-9/psyntax-pp.scm' >psyntax-pp.sha256
 rm module/ice-9/psyntax-pp.scm
 
 ## now let us prepare to rebuild it
@@ -19,6 +19,7 @@ patch <../../../../stage2.patch
 cd ../..
 
 ## rebuild it
+./autogen.sh
 ./configure --prefix=/tmp
 make config.h
 make libguile/scmconfig.h
